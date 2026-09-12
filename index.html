@@ -1,0 +1,1661 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aerocast - Hava Tahmin Sitesi</title>
+    <!-- Modern SVG Favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><circle cx='50' cy='50' r='46' fill='%230f172a' stroke='%2338bdf8' stroke-width='6'/><path d='M25 50 Q50 20 75 50 T125 50' fill='none' stroke='%2338bdf8' stroke-width='6' opacity='0.75'/><circle cx='50' cy='50' r='12' fill='%2338bdf8'/></svg>">
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+            font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text", "Segoe UI", Roboto, sans-serif;
+            user-select: none;
+        }
+
+        body {
+            background-color: #030712;
+            color: #ffffff;
+            overflow: hidden;
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #webgl-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* Ana UI Katmanı */
+        .app-shell {
+            position: relative;
+            z-index: 10;
+            width: 100vw;
+            height: 100vh;
+            display: grid;
+            grid-template-columns: 480px 1fr;
+            padding: 24px;
+            gap: 24px;
+            pointer-events: none;
+        }
+
+        /* Sol Panel: Apple Weather Standardı */
+        .sidebar {
+            pointer-events: auto;
+            height: 100%;
+            background: rgba(15, 23, 42, 0.78);
+            backdrop-filter: blur(40px);
+            -webkit-backdrop-filter: blur(40px);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 32px;
+            padding: 26px;
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+            box-shadow: 0 25px 60px rgba(0, 0, 0, 0.7);
+            overflow-y: auto;
+            transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .sidebar::-webkit-scrollbar { display: none; }
+
+        /* Arama & Canlı Autocomplete */
+        .search-container-relative {
+            position: relative;
+            width: 100%;
+            z-index: 50;
+        }
+
+        .search-wrap {
+            display: flex;
+            align-items: center;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.12);
+            border-radius: 20px;
+            padding: 10px 14px 10px 18px;
+            gap: 10px;
+            transition: all 0.3s;
+        }
+
+        .search-wrap:focus-within {
+            border-color: #38bdf8;
+            background: rgba(255, 255, 255, 0.12);
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+        }
+
+        .search-input {
+            background: transparent;
+            border: none;
+            outline: none;
+            color: #fff;
+            font-size: 0.95rem;
+            width: 100%;
+        }
+
+        .search-input::placeholder { color: #64748b; }
+
+        .search-dropdown {
+            position: absolute;
+            top: calc(100% + 8px);
+            left: 0;
+            width: 100%;
+            background: rgba(15, 23, 42, 0.95);
+            backdrop-filter: blur(25px);
+            -webkit-backdrop-filter: blur(25px);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            border-radius: 18px;
+            overflow: hidden;
+            display: none;
+            flex-direction: column;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.8);
+            max-height: 220px;
+            overflow-y: auto;
+            z-index: 60;
+        }
+
+        .search-item {
+            padding: 10px 16px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            cursor: pointer;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            transition: background 0.2s;
+        }
+
+        .search-item:hover {
+            background: rgba(56, 189, 248, 0.15);
+            color: #38bdf8;
+        }
+
+        .search-item-country {
+            font-size: 0.72rem;
+            color: #94a3b8;
+        }
+
+        .locate-btn {
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            color: #38bdf8;
+            border-radius: 12px;
+            padding: 6px 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.25s;
+            flex-shrink: 0;
+        }
+
+        .locate-btn:hover {
+            background: #38bdf8;
+            color: #030712;
+            box-shadow: 0 0 14px rgba(56, 189, 248, 0.5);
+        }
+
+        .locate-btn.loading {
+            opacity: 0.5;
+            cursor: wait;
+        }
+
+        /* Meteorolojik Uyarı Kartı */
+        .weather-alert-banner {
+            background: rgba(239, 68, 68, 0.14);
+            border: 1px solid rgba(239, 68, 68, 0.35);
+            border-radius: 18px;
+            padding: 12px 16px;
+            display: flex;
+            align-items: flex-start;
+            gap: 12px;
+            transition: all 0.3s;
+        }
+
+        .weather-alert-banner.alert-safe {
+            background: rgba(16, 185, 129, 0.1);
+            border-color: rgba(16, 185, 129, 0.3);
+        }
+
+        .weather-alert-banner.alert-warning {
+            background: rgba(245, 158, 11, 0.14);
+            border-color: rgba(245, 158, 11, 0.4);
+        }
+
+        .weather-alert-banner.alert-cold {
+            background: rgba(56, 189, 248, 0.14);
+            border-color: rgba(56, 189, 248, 0.4);
+        }
+
+        .alert-icon {
+            font-size: 1.3rem;
+            line-height: 1;
+        }
+
+        .alert-body {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+
+        .alert-title {
+            font-size: 0.78rem;
+            font-weight: 700;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+        }
+
+        .alert-desc {
+            font-size: 0.75rem;
+            color: #cbd5e1;
+            line-height: 1.25;
+        }
+
+        /* Favoriler & Arama Geçmişi UI Çipleri */
+        .chip-container {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-top: 4px;
+        }
+
+        .saved-chip {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            background: rgba(255, 255, 255, 0.06);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 5px 12px;
+            border-radius: 14px;
+            font-size: 0.75rem;
+            color: #cbd5e1;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .saved-chip:hover {
+            background: rgba(56, 189, 248, 0.2);
+            border-color: #38bdf8;
+            color: #fff;
+        }
+
+        .chip-del {
+            font-size: 0.85rem;
+            color: #94a3b8;
+            cursor: pointer;
+            padding-left: 2px;
+        }
+
+        .chip-del:hover {
+            color: #ef4444;
+        }
+
+        /* Ana Sıcaklık & Başlık (ORTALANMIŞ & FERAH DÜZEN) */
+        .city-header {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            text-align: center;
+            padding: 10px 0 6px 0;
+            position: relative;
+        }
+
+        .city-title-row {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            position: relative;
+        }
+
+        .city-name {
+            font-size: 2.7rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+        }
+
+        .fav-star-btn {
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            font-size: 1.6rem;
+            line-height: 1;
+            color: #64748b;
+            transition: transform 0.2s, color 0.2s;
+            padding: 4px;
+        }
+
+        .fav-star-btn:hover {
+            transform: scale(1.18);
+        }
+
+        .fav-star-btn.is-fav {
+            color: #facc15;
+            text-shadow: 0 0 14px rgba(250, 204, 21, 0.65);
+        }
+
+        .meta-sub-row {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            margin-top: 6px;
+            flex-wrap: wrap;
+        }
+
+        .coords-text {
+            font-size: 0.74rem;
+            color: #38bdf8;
+            letter-spacing: 1.2px;
+            text-transform: uppercase;
+            font-weight: 600;
+        }
+
+        .local-time-tag {
+            font-size: 0.74rem;
+            color: #f1f5f9;
+            background: rgba(255, 255, 255, 0.09);
+            padding: 3px 10px;
+            border-radius: 14px;
+            letter-spacing: 0.5px;
+            font-weight: 600;
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+
+        .temp-display {
+            display: flex;
+            align-items: flex-start;
+            justify-content: center;
+            margin: 14px 0 6px 0;
+            line-height: 0.85;
+        }
+
+        .temp-num {
+            font-size: 6.4rem;
+            font-weight: 200;
+            letter-spacing: -4px;
+            margin-left: 10px;
+        }
+
+        .temp-deg {
+            font-size: 2.2rem;
+            font-weight: 300;
+            color: #38bdf8;
+            margin-top: 10px;
+            margin-left: 4px;
+        }
+
+        .condition-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(56, 189, 248, 0.12);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            padding: 7px 18px;
+            border-radius: 24px;
+            font-size: 0.88rem;
+            font-weight: 600;
+            color: #e0f2fe;
+            margin-top: 4px;
+            box-shadow: 0 4px 20px rgba(56, 189, 248, 0.15);
+        }
+
+        /* Akıllı Giyim & Günlük Yaşam Tavsiyesi Rozeti */
+        .clothing-advice-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            background: rgba(255, 255, 255, 0.04);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 20px;
+            padding: 6px 14px;
+            font-size: 0.74rem;
+            color: #cbd5e1;
+            margin-top: 10px;
+            transition: all 0.3s;
+            max-width: 90%;
+        }
+
+        /* Kart Yapısı */
+        .weather-card {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 20px;
+            padding: 16px;
+        }
+
+        .card-title {
+            font-size: 0.68rem;
+            letter-spacing: 1.5px;
+            color: #64748b;
+            text-transform: uppercase;
+            font-weight: 700;
+            margin-bottom: 12px;
+        }
+
+        /* 24 Saatlik Akış */
+        .hourly-scroll {
+            display: flex;
+            gap: 16px;
+            overflow-x: auto;
+            padding-bottom: 4px;
+        }
+
+        .hourly-scroll::-webkit-scrollbar { display: none; }
+
+        .hourly-slot {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 6px;
+            min-width: 48px;
+        }
+
+        .h-time { font-size: 0.72rem; color: #94a3b8; }
+        .h-icon { font-size: 1.2rem; }
+        .h-temp { font-size: 0.9rem; font-weight: 700; color: #f8fafc; }
+
+        /* 7 Günlük Liste */
+        .daily-stack {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+
+        .daily-line {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.85rem;
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+        }
+
+        /* Tam Gün İsimleri */
+        .d-name { 
+            width: 105px; 
+            font-weight: 600; 
+            color: #cbd5e1; 
+            text-align: left;
+        }
+
+        .d-range { display: flex; gap: 12px; font-weight: 700; }
+        .d-min { color: #64748b; }
+        .d-max { color: #f8fafc; }
+
+        /* Genişletilmiş Metrik Izgarası */
+        .grid-stats {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+        }
+
+        .stat-cell {
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            border-radius: 16px;
+            padding: 12px 14px;
+        }
+
+        .s-lbl { font-size: 0.65rem; color: #64748b; text-transform: uppercase; letter-spacing: 1px; }
+        .s-val { font-size: 1.25rem; font-weight: 700; color: #fff; margin-top: 2px; }
+        .s-sub { font-size: 0.68rem; color: #38bdf8; margin-top: 2px; }
+
+        /* Sağ Alan */
+        .viewport-controls {
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            align-items: flex-end;
+            pointer-events: none;
+        }
+
+        .top-row {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+            pointer-events: auto;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .unit-toggle-btn {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(56, 189, 248, 0.35);
+            color: #38bdf8;
+            padding: 8px 16px;
+            border-radius: 30px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.25s;
+        }
+
+        .unit-toggle-btn:hover {
+            background: #38bdf8;
+            color: #030712;
+            box-shadow: 0 0 16px rgba(56, 189, 248, 0.4);
+        }
+
+        .status-pill {
+            background: rgba(15, 23, 42, 0.7);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            padding: 8px 18px;
+            border-radius: 30px;
+            font-size: 0.75rem;
+            letter-spacing: 1px;
+            color: #38bdf8;
+            font-weight: 600;
+        }
+
+        .quick-group {
+            display: flex;
+            gap: 6px;
+            background: rgba(15, 23, 42, 0.65);
+            backdrop-filter: blur(20px);
+            padding: 6px;
+            border-radius: 30px;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            overflow-x: auto;
+        }
+
+        .quick-btn {
+            background: transparent;
+            border: none;
+            color: #94a3b8;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.25s;
+            white-space: nowrap;
+        }
+
+        .quick-btn:hover, .quick-btn.active {
+            background: #38bdf8;
+            color: #030712;
+            font-weight: 700;
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.4);
+        }
+
+        .bottom-right-dock {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-end;
+            gap: 12px;
+            pointer-events: auto;
+        }
+
+        /* Uçuş Telemetri Şeridi (Kibar & Sırıtmayan HUD Paneli) */
+        .flight-telemetry-hud {
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(56, 189, 248, 0.25);
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            color: #e0f2fe;
+            letter-spacing: 0.8px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            opacity: 0;
+            transform: translateY(8px);
+            transition: all 0.4s ease;
+            pointer-events: none;
+        }
+
+        .flight-telemetry-hud.active {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .flight-telemetry-hud span {
+            color: #38bdf8;
+            font-weight: 700;
+        }
+
+        .zoom-out-btn {
+            pointer-events: auto;
+            background: rgba(15, 23, 42, 0.8);
+            border: 1px solid rgba(56, 189, 248, 0.4);
+            color: #38bdf8;
+            padding: 12px 24px;
+            border-radius: 30px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            letter-spacing: 1px;
+            cursor: pointer;
+            backdrop-filter: blur(20px);
+            transition: all 0.25s;
+        }
+
+        .zoom-out-btn:hover {
+            background: #38bdf8;
+            color: #030712;
+            box-shadow: 0 0 25px rgba(56, 189, 248, 0.5);
+        }
+
+        /* Geliştirici Bilgisi */
+        .developer-footer {
+            margin-top: 4px;
+            padding-top: 12px;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            text-align: center;
+            font-size: 0.72rem;
+            color: #64748b;
+            letter-spacing: 0.8px;
+            line-height: 1.5;
+        }
+
+        .developer-footer span {
+            color: #38bdf8;
+            font-weight: 600;
+        }
+
+        /* Mobil Panel Açma / Kapatma Butonu */
+        .mobile-panel-toggle {
+            display: none;
+            pointer-events: auto;
+            background: rgba(15, 23, 42, 0.85);
+            border: 1px solid #38bdf8;
+            color: #38bdf8;
+            padding: 10px 18px;
+            border-radius: 30px;
+            font-size: 0.8rem;
+            font-weight: 700;
+            cursor: pointer;
+            backdrop-filter: blur(20px);
+            box-shadow: 0 0 15px rgba(56, 189, 248, 0.3);
+            margin-bottom: 8px;
+        }
+
+        /* --- RESPONSIVE MEDIA QUERIES --- */
+        @media (max-width: 900px) {
+            .app-shell {
+                grid-template-columns: 1fr;
+                padding: 16px;
+                gap: 16px;
+            }
+
+            .mobile-panel-toggle {
+                display: inline-flex;
+                align-items: center;
+                gap: 6px;
+            }
+
+            .sidebar {
+                position: fixed;
+                left: 16px;
+                right: 16px;
+                bottom: 16px;
+                top: auto;
+                height: 72vh;
+                z-index: 100;
+                transform: translateY(115%);
+            }
+
+            .sidebar.mobile-open {
+                transform: translateY(0%);
+            }
+
+            .viewport-controls {
+                height: 100%;
+            }
+
+            .top-row {
+                width: 100%;
+                justify-content: space-between;
+            }
+
+            .city-name {
+                font-size: 2.2rem;
+            }
+
+            .temp-num {
+                font-size: 5rem;
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <canvas id="webgl-canvas"></canvas>
+
+    <div class="app-shell">
+        <!-- Gerçek & Kapsamlı Hava Durumu Paneli -->
+        <aside class="sidebar" id="weather-sidebar">
+            <div class="search-container-relative">
+                <div class="search-wrap">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#64748b" stroke-width="2.2"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+                    <input type="text" class="search-input" id="city-search" placeholder="Dünyada herhangi bir şehri ara... (Kısayol: /)" autocomplete="off">
+                    <button class="locate-btn" id="locate-me-btn" title="Konumumu Bul (Kısayol: L)" onclick="locateUserGPS()">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.3"><circle cx="12" cy="12" r="3"></circle><path d="M12 2v3m0 14v3M2 12h3m14 0h3"></path></svg>
+                    </button>
+                </div>
+                <!-- Canlı Autocomplete Listesi -->
+                <div class="search-dropdown" id="search-dropdown"></div>
+            </div>
+
+            <!-- Meteorolojik Resmi Bildirim ve Uyarı Alanı -->
+            <div class="weather-alert-banner alert-safe" id="alert-banner">
+                <div class="alert-icon" id="alert-icon">🛡️</div>
+                <div class="alert-body">
+                    <div class="alert-title" id="alert-title">Stabil Meteorolojik Koşullar</div>
+                    <div class="alert-desc" id="alert-desc">Herhangi bir kritik meteorolojik risk veya resmi uyarı bulunmamaktadır.</div>
+                </div>
+            </div>
+
+            <!-- Favoriler & Geçmiş Bölümleri -->
+            <div id="favorites-section" style="display: none;">
+                <div class="card-title" style="margin-bottom: 6px;">⭐ Favori Şehirler</div>
+                <div class="chip-container" id="favorites-chips"></div>
+            </div>
+
+            <div id="history-section" style="display: none;">
+                <div class="card-title" style="margin-bottom: 6px;">🕒 Son Aramalar</div>
+                <div class="chip-container" id="history-chips"></div>
+            </div>
+
+            <!-- ORTALANMIŞ VE FERAH CITY HEADER -->
+            <div class="city-header">
+                <div class="city-title-row">
+                    <div class="city-name" id="val-city">İstanbul</div>
+                    <button class="fav-star-btn" id="fav-btn" title="Favorilere Ekle/Çıkar" onclick="toggleFavorite()">★</button>
+                </div>
+                <div class="meta-sub-row">
+                    <div class="coords-text" id="val-coords">LAT: 41.01° • LON: 28.98°</div>
+                    <div class="local-time-tag" id="val-localtime">🕒 --:--</div>
+                </div>
+                <div class="temp-display">
+                    <div class="temp-num" id="val-temp">--</div>
+                    <div class="temp-deg" id="val-unit-symbol">°C</div>
+                </div>
+                <div class="condition-badge">
+                    <span id="val-icon">⛅</span>
+                    <span id="val-desc">Veri Alınıyor...</span>
+                </div>
+                <!-- Akıllı Giyim & Günlük Yaşam Tavsiyesi Rozeti -->
+                <div class="clothing-advice-pill" id="val-clothing-advice">
+                    <span>💡</span> <span id="val-clothing-text">Tavsiye hesaplanıyor...</span>
+                </div>
+            </div>
+
+            <!-- 24 Saatlik Akış -->
+            <div class="weather-card">
+                <div class="card-title">24 Saatlik Sıcaklık Akışı</div>
+                <div class="hourly-scroll" id="hourly-scroll"></div>
+            </div>
+
+            <!-- 7 Günlük Tahmin -->
+            <div class="weather-card">
+                <div class="card-title">7 Günlük Tahmin</div>
+                <div class="daily-stack" id="daily-stack"></div>
+            </div>
+
+            <!-- Detaylı Meteorolojik Parametreler (8 Parametreli Genişletilmiş Izgara) -->
+            <div class="grid-stats">
+                <div class="stat-cell">
+                    <div class="s-lbl">Hissedilen</div>
+                    <div class="s-val" id="val-apparent">--°</div>
+                    <div class="s-sub" id="val-solar">Gündüz Kuşağı</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="s-lbl">Bağıl Nem</div>
+                    <div class="s-val" id="val-humidity">--%</div>
+                    <div class="s-sub">Doygunluk Eşiği</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="s-lbl">Rüzgar Hızı</div>
+                    <div class="s-val" id="val-wind">-- km/s</div>
+                    <div class="s-sub" id="val-wind-deg">--° Açıyla Esinti</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="s-lbl">Yüzey Basıncı</div>
+                    <div class="s-val" id="val-pressure">-- hPa</div>
+                    <div class="s-sub">Barometrik Stabilite</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="s-lbl">Görüş Mesafesi</div>
+                    <div class="s-val" id="val-visibility">-- km</div>
+                    <div class="s-sub" id="val-vis-state">Optik Berraklık</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="s-lbl">UV İndeksi</div>
+                    <div class="s-val" id="val-uv">--</div>
+                    <div class="s-sub" id="val-uv-desc">Radyasyon İndeksi</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="s-lbl">Yağış Olasılığı</div>
+                    <div class="s-val" id="val-precip-prob">--%</div>
+                    <div class="s-sub">Saatlik Yağış Riski</div>
+                </div>
+                <div class="stat-cell">
+                    <div class="s-lbl">Deniz / Kıyı Durumu</div>
+                    <div class="s-val" id="val-marine">--</div>
+                    <div class="s-sub" id="val-marine-sub">Kıyı Güvenlik İndeksi</div>
+                </div>
+            </div>
+
+            <!-- Geliştirici Bilgisi -->
+            <footer class="developer-footer">
+                <span>Serkan Yazıcı</span> 2026 // HTML, CSS & JavaScript İle Geliştirildi
+            </footer>
+        </aside>
+
+        <!-- Sağ Alan: 3D Dünya & Şehir Seçici -->
+        <main class="viewport-controls">
+            <div class="top-row">
+                <button class="mobile-panel-toggle" id="panel-toggle-btn" onclick="toggleMobileSidebar()">
+                    📊 Detaylı Rapor
+                </button>
+                <button class="unit-toggle-btn" id="unit-toggle-btn" title="Kısayol: U" onclick="toggleTemperatureUnit()">°C / °F</button>
+                <div class="status-pill" id="sun-status-badge">CANLI GÜNEŞ: HESAPLANIYOR</div>
+                <div class="quick-group">
+                    <button class="quick-btn active" onclick="goToLocation('İstanbul', 41.0082, 28.9784)">İstanbul</button>
+                    <button class="quick-btn" onclick="goToLocation('Ankara', 39.9334, 32.8597)">Ankara</button>
+                    <button class="quick-btn" onclick="goToLocation('Tokyo', 35.6762, 139.6503)">Tokyo</button>
+                    <button class="quick-btn" onclick="goToLocation('New York', 40.7128, -74.0060)">New York</button>
+                </div>
+            </div>
+
+            <!-- Sağ Alt: Uçuş Telemetrisi & Panoramik Buton -->
+            <div class="bottom-right-dock">
+                <div class="flight-telemetry-hud" id="flight-hud">
+                    ✈️ TELEMETRİ // <span id="flight-hud-route">İstanbul ➔ Tokyo</span> • <span id="flight-hud-dist">0 km</span>
+                </div>
+                <button class="zoom-out-btn" title="Kısayol: Space" onclick="zoomOutOrbit()">🛰️ Panoramik Bakış</button>
+            </div>
+        </main>
+    </div>
+
+    <!-- Three.js, OrbitControls & TWEEN -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.umd.js"></script>
+
+    <script>
+        // --- 1. KOORDİNAT MATEMATİĞİ ---
+        const earthRadius = 1.35;
+
+        function latLonToVector(lat, lon, r = 1.0) {
+            const phi = (90 - lat) * (Math.PI / 180);
+            const theta = (lon + 180) * (Math.PI / 180);
+            return new THREE.Vector3(
+                -r * Math.sin(phi) * Math.cos(theta),
+                r * Math.cos(phi),
+                r * Math.sin(phi) * Math.sin(theta)
+            );
+        }
+
+        // İki koordinat arası kuş uçuşu mesafe (Haversine formülü)
+        function calculateDistanceKm(lat1, lon1, lat2, lon2) {
+            const R = 6371; // km
+            const dLat = (lat2 - lat1) * (Math.PI / 180);
+            const dLon = (lon2 - lon1) * (Math.PI / 180);
+            const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+                      Math.cos(lat1 * (Math.PI / 180)) * Math.cos(lat2 * (Math.PI / 180)) *
+                      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+            const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+            return Math.round(R * c);
+        }
+
+        function getLiveSunPosition() {
+            const now = new Date();
+            const utcHours = now.getUTCHours() + now.getUTCMinutes() / 60;
+            const subsolarLon = (12.0 - utcHours) * 15.0;
+
+            const start = new Date(Date.UTC(now.getUTCFullYear(), 0, 0));
+            const dayOfYear = Math.floor((now - start) / 86400000);
+            const subsolarLat = 23.44 * Math.sin((2 * Math.PI / 365) * (dayOfYear - 80));
+
+            document.getElementById('sun-status-badge').innerText = `☀️ Canlı Güneş: ${subsolarLon.toFixed(1)}° Boylam • ${now.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+
+            return latLonToVector(subsolarLat, subsolarLon, 1.0).normalize();
+        }
+
+        // --- 2. THREE.JS SAHNE & DÜNYA MOTORU ---
+        const canvas = document.querySelector('#webgl-canvas');
+        const scene = new THREE.Scene();
+
+        const camera = new THREE.PerspectiveCamera(40, window.innerWidth / window.innerHeight, 0.01, 100);
+        camera.position.set(0, 0.8, 4.3);
+
+        const renderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true, alpha: false, powerPreference: "high-performance" });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+        renderer.toneMapping = THREE.ACESFilmicToneMapping;
+        renderer.toneMappingExposure = 1.35;
+
+        const controls = new THREE.OrbitControls(camera, renderer.domElement);
+        controls.enableDamping = true;
+        controls.dampingFactor = 0.05;
+        controls.rotateSpeed = 0.5;
+        controls.minDistance = 1.42;
+        controls.maxDistance = 7.5;
+
+        // Materyal & Gündüz/Gece Doku Shader'ı
+        const textureLoader = new THREE.TextureLoader();
+        const dayTexture = textureLoader.load('https://unpkg.com/three-globe/example/img/earth-blue-marble.jpg');
+        const nightTexture = textureLoader.load('https://unpkg.com/three-globe/example/img/earth-night.jpg');
+
+        const earthMat = new THREE.ShaderMaterial({
+            uniforms: {
+                dayTexture: { value: dayTexture },
+                nightTexture: { value: nightTexture },
+                sunDir: { value: new THREE.Vector3() }
+            },
+            vertexShader: `
+                varying vec2 vUv;
+                varying vec3 vNormal;
+                varying vec3 vWorldPos;
+                void main() {
+                    vUv = uv;
+                    vNormal = normalize(mat3(modelMatrix) * normal);
+                    vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+                    gl_Position = projectionMatrix * viewMatrix * vec4(vWorldPos, 1.0);
+                }
+            `,
+            fragmentShader: `
+                uniform sampler2D dayTexture;
+                uniform sampler2D nightTexture;
+                uniform vec3 sunDir;
+                varying vec2 vUv;
+                varying vec3 vNormal;
+
+                void main() {
+                    vec3 day = texture2D(dayTexture, vUv).rgb;
+                    vec3 night = texture2D(nightTexture, vUv).rgb * 2.8;
+
+                    float sunDot = dot(vNormal, sunDir);
+                    float dayWeight = smoothstep(-0.10, 0.10, sunDot);
+
+                    gl_FragColor = vec4(mix(night, day, dayWeight), 1.0);
+                }
+            `
+        });
+
+        const earthMesh = new THREE.Mesh(new THREE.SphereGeometry(earthRadius, 64, 64), earthMat);
+        scene.add(earthMesh);
+
+        // Atmosferik Mavi Hale
+        const atmosMat = new THREE.ShaderMaterial({
+            vertexShader: `
+                varying vec3 vNormal;
+                void main() {
+                    vNormal = normalize(normalMatrix * normal);
+                    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                }
+            `,
+            fragmentShader: `
+                varying vec3 vNormal;
+                void main() {
+                    float intensity = pow(0.68 - dot(vNormal, vec3(0, 0, 1.0)), 2.6);
+                    gl_FragColor = vec4(0.0, 0.85, 1.0, 1.0) * intensity;
+                }
+            `,
+            blending: THREE.AdditiveBlending,
+            side: THREE.BackSide,
+            transparent: true
+        });
+        scene.add(new THREE.Mesh(new THREE.SphereGeometry(earthRadius * 1.15, 64, 64), atmosMat));
+
+        // Şehir İşaretleme Pin ve Halkası (Radar Dalgalı)
+        const pinDot = new THREE.Mesh(
+            new THREE.SphereGeometry(0.012, 16, 16),
+            new THREE.MeshBasicMaterial({ color: 0x38bdf8 })
+        );
+        scene.add(pinDot);
+
+        const targetRing = new THREE.Mesh(
+            new THREE.RingGeometry(0.018, 0.034, 32),
+            new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0 })
+        );
+        scene.add(targetRing);
+
+        // Radar Nabız / Sonar Halkası
+        const pulseRing = new THREE.Mesh(
+            new THREE.RingGeometry(0.02, 0.028, 32),
+            new THREE.MeshBasicMaterial({ color: 0x38bdf8, side: THREE.DoubleSide, transparent: true, opacity: 0 })
+        );
+        scene.add(pulseRing);
+
+        // Yıldız Alanı
+        const starGeo = new THREE.BufferGeometry();
+        const starPos = new Float32Array(3000 * 3);
+        for (let i = 0; i < 9000; i++) starPos[i] = (Math.random() - 0.5) * 80;
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        scene.add(new THREE.Points(starGeo, new THREE.PointsMaterial({ size: 0.015, color: 0x88aacc, transparent: true, opacity: 0.7 })));
+
+        // --- AKTİF ŞEHİR HAFIZASI, FAVORİLER, ARAMA GEÇMİŞİ & BİRİM YÖNETİMİ ---
+        let currentCityData = { name: "İstanbul", lat: 41.0082, lon: 28.9784 };
+        let lastFetchedWeatherData = null;
+        let isFahrenheit = false;
+        let flightHudTimer = null;
+
+        function toggleTemperatureUnit() {
+            isFahrenheit = !isFahrenheit;
+            const btn = document.getElementById('unit-toggle-btn');
+            btn.innerText = isFahrenheit ? "°F (İmperial)" : "°C (Metrik)";
+            document.getElementById('val-unit-symbol').innerText = isFahrenheit ? "°F" : "°C";
+
+            if (lastFetchedWeatherData) {
+                renderAllWeatherData(lastFetchedWeatherData);
+            }
+        }
+
+        function formatTemp(celsius) {
+            if (isFahrenheit) {
+                return Math.round((celsius * 9 / 5) + 32);
+            }
+            return Math.round(celsius);
+        }
+
+        function getFavorites() {
+            return JSON.parse(localStorage.getItem('aerocast_favs') || '[]');
+        }
+
+        function saveFavorites(favs) {
+            localStorage.setItem('aerocast_favs', JSON.stringify(favs));
+            renderFavorites();
+            updateFavButton();
+        }
+
+        function getHistory() {
+            return JSON.parse(localStorage.getItem('aerocast_history') || '[]');
+        }
+
+        function addHistory(cityName, lat, lon) {
+            let hist = getHistory().filter(item => item.name.toLowerCase() !== cityName.toLowerCase());
+            hist.unshift({ name: cityName, lat, lon });
+            if (hist.length > 5) hist = hist.slice(0, 5);
+            localStorage.setItem('aerocast_history', JSON.stringify(hist));
+            renderHistory();
+        }
+
+        function toggleFavorite() {
+            let favs = getFavorites();
+            const idx = favs.findIndex(f => f.name.toLowerCase() === currentCityData.name.toLowerCase());
+            if (idx > -1) {
+                favs.splice(idx, 1);
+            } else {
+                favs.push({ name: currentCityData.name, lat: currentCityData.lat, lon: currentCityData.lon });
+            }
+            saveFavorites(favs);
+        }
+
+        function updateFavButton() {
+            const favs = getFavorites();
+            const isFav = favs.some(f => f.name.toLowerCase() === currentCityData.name.toLowerCase());
+            const btn = document.getElementById('fav-btn');
+            if (btn) btn.classList.toggle('is-fav', isFav);
+        }
+
+        function renderFavorites() {
+            const favs = getFavorites();
+            const container = document.getElementById('favorites-chips');
+            const section = document.getElementById('favorites-section');
+            if (!container || !section) return;
+
+            if (favs.length === 0) {
+                section.style.display = "none";
+                return;
+            }
+
+            section.style.display = "block";
+            container.innerHTML = "";
+            favs.forEach(f => {
+                const chip = document.createElement('div');
+                chip.className = "saved-chip";
+                chip.innerHTML = `<span>${f.name}</span><span class="chip-del" title="Sil">&times;</span>`;
+                chip.querySelector('span').onclick = () => goToLocation(f.name, f.lat, f.lon);
+                chip.querySelector('.chip-del').onclick = (e) => {
+                    e.stopPropagation();
+                    let updated = getFavorites().filter(item => item.name !== f.name);
+                    saveFavorites(updated);
+                };
+                container.appendChild(chip);
+            });
+        }
+
+        function renderHistory() {
+            const hist = getHistory();
+            const container = document.getElementById('history-chips');
+            const section = document.getElementById('history-section');
+            if (!container || !section) return;
+
+            if (hist.length === 0) {
+                section.style.display = "none";
+                return;
+            }
+
+            section.style.display = "block";
+            container.innerHTML = "";
+            hist.forEach(h => {
+                const chip = document.createElement('div');
+                chip.className = "saved-chip";
+                chip.innerText = h.name;
+                chip.onclick = () => goToLocation(h.name, h.lat, h.lon);
+                container.appendChild(chip);
+            });
+        }
+
+        function toggleMobileSidebar() {
+            const sidebar = document.getElementById('weather-sidebar');
+            const btn = document.getElementById('panel-toggle-btn');
+            sidebar.classList.toggle('mobile-open');
+            if (sidebar.classList.contains('mobile-open')) {
+                btn.innerText = "✕ Paneli Kapat";
+            } else {
+                btn.innerText = "📊 Detaylı Rapor";
+            }
+        }
+
+        // --- TARAYICI KONUM API ENTEGRASYONU ---
+        function locateUserGPS() {
+            const btn = document.getElementById('locate-me-btn');
+            if (!navigator.geolocation) {
+                alert("Tarayıcınız konum servisini desteklemiyor.");
+                return;
+            }
+
+            btn.classList.add('loading');
+
+            navigator.geolocation.getCurrentPosition(
+                async (position) => {
+                    const lat = position.coords.latitude;
+                    const lon = position.coords.longitude;
+                    let detectedCity = "Mevcut Konumum";
+
+                    try {
+                        const revRes = await fetch(`https://api.bigdatacloud.net/data/reverse-geocode-client?latitude=${lat}&longitude=${lon}&localityLanguage=tr`);
+                        const revData = await revRes.json();
+                        detectedCity = revData.city || revData.locality || revData.principalSubdivision || "Konumum";
+                    } catch (e) {
+                        console.warn("Konum ismi tersine çözülemedi:", e);
+                    }
+
+                    btn.classList.remove('loading');
+                    addHistory(detectedCity, lat, lon);
+                    goToLocation(detectedCity, lat, lon);
+                },
+                (error) => {
+                    btn.classList.remove('loading');
+                    let msg = "Konum alınamadı.";
+                    if (error.code === error.PERMISSION_DENIED) msg = "Konum izni reddedildi. Lütfen tarayıcı ayarlarından izin verin.";
+                    else if (error.code === error.POSITION_UNAVAILABLE) msg = "Konum bilgisine ulaşılamıyor.";
+                    else if (error.code === error.TIMEOUT) msg = "Konum alma isteği zaman aşımına uğradı.";
+                    alert(msg);
+                },
+                { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
+            );
+        }
+
+        // --- 3. SİNEMATİK DÜNYA HAREKETİ & TELEMETRİ ---
+        function triggerFlightTelemetry(prevCity, nextCity, distKm) {
+            const hud = document.getElementById('flight-hud');
+            const routeSpan = document.getElementById('flight-hud-route');
+            const distSpan = document.getElementById('flight-hud-dist');
+            if (!hud) return;
+
+            routeSpan.innerText = `${prevCity} ➔ ${nextCity}`;
+            distSpan.innerText = `${distKm.toLocaleString('tr-TR')} km`;
+
+            hud.classList.add('active');
+            clearTimeout(flightHudTimer);
+            flightHudTimer = setTimeout(() => {
+                hud.classList.remove('active');
+            }, 2300);
+        }
+
+        function goToLocation(cityName, lat, lon) {
+            // Şehirler arası telemetri hesabı
+            if (currentCityData && currentCityData.name !== cityName) {
+                const dist = calculateDistanceKm(currentCityData.lat, currentCityData.lon, lat, lon);
+                triggerFlightTelemetry(currentCityData.name, cityName, dist);
+            }
+
+            currentCityData = { name: cityName, lat: lat, lon: lon };
+            updateFavButton();
+
+            document.querySelectorAll('.quick-btn').forEach(btn => btn.classList.toggle('active', btn.innerText === cityName));
+
+            const surfacePos = latLonToVector(lat, lon, earthRadius);
+            const cameraPos = latLonToVector(lat, lon, earthRadius + 0.45);
+
+            pinDot.position.copy(surfacePos);
+            targetRing.position.copy(latLonToVector(lat, lon, earthRadius + 0.003));
+            targetRing.lookAt(latLonToVector(lat, lon, earthRadius + 1));
+            targetRing.material.opacity = 1;
+
+            pulseRing.position.copy(latLonToVector(lat, lon, earthRadius + 0.002));
+            pulseRing.lookAt(latLonToVector(lat, lon, earthRadius + 1));
+            pulseRing.material.opacity = 0.8;
+
+            new TWEEN.Tween(camera.position)
+                .to({ x: cameraPos.x, y: cameraPos.y, z: cameraPos.z }, 2000)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .start();
+
+            new TWEEN.Tween(controls.target)
+                .to({ x: surfacePos.x, y: surfacePos.y, z: surfacePos.z }, 1700)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .start();
+
+            fetchFullWeatherData(lat, lon, cityName);
+        }
+
+        function zoomOutOrbit() {
+            targetRing.material.opacity = 0;
+            pulseRing.material.opacity = 0;
+            document.querySelectorAll('.quick-btn').forEach(b => b.classList.remove('active'));
+
+            new TWEEN.Tween(camera.position)
+                .to({ x: 0, y: 0.8, z: 4.3 }, 1800)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .start();
+
+            new TWEEN.Tween(controls.target)
+                .to({ x: 0, y: 0, z: 0 }, 1600)
+                .easing(TWEEN.Easing.Cubic.InOut)
+                .start();
+        }
+
+        // --- 4. HAVA DURUMU API VE GELİŞMİŞ VERİ YÖNETİMİ ---
+        async function fetchFullWeatherData(lat, lon, cityName) {
+            document.getElementById('val-city').innerText = cityName;
+            document.getElementById('val-coords').innerText = `LAT: ${lat.toFixed(2)}° • LON: ${lon.toFixed(2)}°`;
+
+            try {
+                const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current=temperature_2m,relative_humidity_2m,apparent_temperature,surface_pressure,wind_speed_10m,wind_direction_10m,weather_code,is_day&hourly=temperature_2m,weather_code,precipitation_probability,visibility,uv_index&daily=weather_code,temperature_2m_max,temperature_2m_min,uv_index_max&timezone=auto`;
+                const marineUrl = `https://marine-api.open-meteo.com/v1/marine?latitude=${lat}&longitude=${lon}&current=wave_height&timezone=auto`;
+
+                const [res, marineRes] = await Promise.allSettled([
+                    fetch(url).then(r => r.json()),
+                    fetch(marineUrl).then(r => r.json())
+                ]);
+
+                const data = res.status === "fulfilled" ? res.value : null;
+                const marineData = marineRes.status === "fulfilled" ? marineRes.value : null;
+
+                if (data) {
+                    data._marineData = marineData;
+                    lastFetchedWeatherData = data;
+                    renderAllWeatherData(data);
+                }
+            } catch (err) {
+                console.error("Hava verisi hatası:", err);
+            }
+        }
+
+        function renderAllWeatherData(data) {
+            const cur = data.current;
+            const hourly = data.hourly;
+            const h = new Date().getHours();
+
+            // Şehrin Yerel Saati (timezone)
+            if (data.timezone) {
+                try {
+                    const localTimeStr = new Intl.DateTimeFormat('tr-TR', {
+                        timeZone: data.timezone,
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        weekday: 'short'
+                    }).format(new Date());
+                    document.getElementById('val-localtime').innerText = `🕒 ${localTimeStr}`;
+                } catch (e) {
+                    document.getElementById('val-localtime').innerText = `🕒 ${new Date().toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'})}`;
+                }
+            }
+
+            // Temel Sıcaklık & Parametreler
+            document.getElementById('val-temp').innerText = formatTemp(cur.temperature_2m);
+            document.getElementById('val-apparent').innerText = `${formatTemp(cur.apparent_temperature)}°`;
+            document.getElementById('val-humidity').innerText = `%${cur.relative_humidity_2m}`;
+
+            const windVal = isFahrenheit ? Math.round(cur.wind_speed_10m * 0.621371) : cur.wind_speed_10m;
+            const windUnit = isFahrenheit ? "mph" : "km/s";
+            document.getElementById('val-wind').innerText = `${windVal} ${windUnit}`;
+
+            document.getElementById('val-pressure').innerText = `${Math.round(cur.surface_pressure)} hPa`;
+            document.getElementById('val-wind-deg').innerText = `${cur.wind_direction_10m}° Açıyla`;
+            document.getElementById('val-solar').innerText = cur.is_day ? "Gündüz Kuşağı (Aydınlık)" : "Gece Kuşağı (Karanlık)";
+
+            // 1. Görüş Mesafesi
+            let rawVisKm = 10;
+            if (hourly && hourly.visibility && hourly.visibility[h] !== undefined) {
+                rawVisKm = (hourly.visibility[h] / 1000).toFixed(1);
+            }
+            const visDisplay = isFahrenheit ? `${(rawVisKm * 0.621371).toFixed(1)} mil` : `${rawVisKm} km`;
+            document.getElementById('val-visibility').innerText = visDisplay;
+            document.getElementById('val-vis-state').innerText = rawVisKm >= 9 ? "Mükemmel Netlik" : (rawVisKm >= 4 ? "Hafif Puslu" : "Düşük Görüş / Sis");
+
+            // 2. UV İndeksi
+            let curUv = 0;
+            if (hourly && hourly.uv_index && hourly.uv_index[h] !== undefined) {
+                curUv = hourly.uv_index[h];
+            } else if (data.daily && data.daily.uv_index_max) {
+                curUv = data.daily.uv_index_max[0];
+            }
+            document.getElementById('val-uv').innerText = curUv.toFixed(1);
+            let uvText = "Düşük Risk";
+            if (curUv >= 3 && curUv < 6) uvText = "Orta Seviye Korunun";
+            else if (curUv >= 6 && curUv < 8) uvText = "Yüksek (Güneş Gözlüğü)";
+            else if (curUv >= 8) uvText = "Çok Tehlikeli (Gölge)";
+            document.getElementById('val-uv-desc').innerText = uvText;
+
+            // 3. Yağış Olasılığı
+            let curPrecip = 0;
+            if (hourly && hourly.precipitation_probability && hourly.precipitation_probability[h] !== undefined) {
+                curPrecip = hourly.precipitation_probability[h];
+            }
+            document.getElementById('val-precip-prob').innerText = `%${curPrecip}`;
+
+            // 4. Akıllı Deniz / Kıyı Durumu Kontrolü (Deniz yoksa ----)
+            const windSpeed = cur.wind_speed_10m;
+            const mData = data._marineData;
+            const hasCoastOrSea = mData && mData.current && mData.current.wave_height !== null && mData.current.wave_height !== undefined;
+
+            if (!hasCoastOrSea) {
+                document.getElementById('val-marine').innerText = "----";
+                document.getElementById('val-marine-sub').innerText = "Karasal Bölge (Kıyı Yok)";
+            } else {
+                let marineTitle = "Sakin Deniz";
+                let marineSub = "Dalga 0.2 - 0.5m • Güvenli";
+                if (windSpeed > 48) {
+                    marineTitle = "Fırtına / Çok Kaba";
+                    marineSub = "Dalga > 3.0m • Tehlikeli";
+                } else if (windSpeed > 32) {
+                    marineTitle = "Kaba Dalgalı";
+                    marineSub = "Dalga 1.5 - 2.5m • Dikkat";
+                } else if (windSpeed > 18) {
+                    marineTitle = "Hafif Çalkantılı";
+                    marineSub = "Dalga 0.6 - 1.2m • Uygun";
+                }
+                document.getElementById('val-marine').innerText = marineTitle;
+                document.getElementById('val-marine-sub').innerText = marineSub;
+            }
+
+            // 5. Akıllı Giyim & Yaşam Tavsiyesi Rozeti
+            evaluateClothingAdvice(cur.temperature_2m, cur.weather_code, windSpeed, curPrecip);
+
+            // 6. Meteorolojik Uyarılar ve Resmi Bildirim Motoru
+            evaluateWeatherAlerts(cur.weather_code, cur.temperature_2m, windSpeed, curPrecip);
+
+            updateBadge(cur.weather_code, cur.is_day);
+            renderHourly(data.hourly);
+            renderDaily(data.daily);
+        }
+
+        // Akıllı Giyim ve Yaşam Tavsiyesi Motoru
+        function evaluateClothingAdvice(temp, code, wind, precip) {
+            const textEl = document.getElementById('val-clothing-text');
+            if (!textEl) return;
+
+            if ([51, 53, 55, 61, 63, 65, 80, 81, 82].includes(code) || precip >= 70) {
+                textEl.innerText = "Yağış bekleniyor; şemsiye ve su geçirmez ayakkabı önerilir ☔";
+            } else if ([71, 73, 75, 85, 86].includes(code) || temp <= 2) {
+                textEl.innerText = "Hava oldukça soğuk; kalın mont, eldiven ve bere şart 🧣";
+            } else if ([95, 96, 99].includes(code)) {
+                textEl.innerText = "Gök gürültülü fırtına var; açık alanda uzun süre kalmayın ⚡";
+            } else if (wind >= 38) {
+                textEl.innerText = "Kuvvetli esinti var; rüzgarlık veya kalın bir ceket giyin 🧥";
+            } else if (temp >= 28) {
+                textEl.innerText = "Sıcak bir gün; nefes alan hafif giysiler ve güneş gözlüğü ideal 🕶️";
+            } else if (temp >= 19) {
+                textEl.innerText = "Hava ferah ve dengeli; tişört veya hafif bir gömlek uygun 👕";
+            } else if (temp >= 10) {
+                textEl.innerText = "Hafif serin bir atmosfer; mevsimlik bir ceket veya hırka tercih edin 👔";
+            } else {
+                textEl.innerText = "Soğuk esinti hissedilebilir; sıcak tutacak bir kaban alınız 🧥";
+            }
+        }
+
+        function evaluateWeatherAlerts(code, temp, wind, precipProb) {
+            const banner = document.getElementById('alert-banner');
+            const icon = document.getElementById('alert-icon');
+            const title = document.getElementById('alert-title');
+            const desc = document.getElementById('alert-desc');
+
+            banner.className = "weather-alert-banner";
+
+            if ([95, 96, 99].includes(code)) {
+                banner.classList.add('alert-warning');
+                icon.innerText = "⚡";
+                title.innerText = "Meteorolojik Uyarı: Şiddetli Fırtına & Şimşek";
+                title.style.color = "#f59e0b";
+                desc.innerText = "Bölgede yıldırım aktivitesi ve kuvvetli oraj tespit edildi. Açık alanlarda bulunmaktan kaçının.";
+            } else if (wind >= 50) {
+                banner.classList.add('alert-warning');
+                icon.innerText = "💨";
+                title.innerText = "Fırtına ve Şiddetli Rüzgar Uyarısı";
+                title.style.color = "#f59e0b";
+                desc.innerText = `Rüzgar hızı saatte ${wind} km seviyesine ulaştı. Çatı uçması ve ağaç devrilmelerine karşı dikkatli olun.`;
+            } else if ([65, 82].includes(code) || precipProb >= 85) {
+                banner.classList.add('alert-warning');
+                icon.innerText = "🌧️";
+                title.innerText = "Şiddetli Yağış & Su Baskını Riski";
+                title.style.color = "#38bdf8";
+                desc.innerText = "Yüksek yoğunluklu sağanak yağış bekleniyor. Ani sel, su taşkınları ve ulaşımda aksamalara dikkat.";
+            } else if (temp <= 0 || [71, 73, 75, 85].includes(code)) {
+                banner.classList.add('alert-cold');
+                icon.innerText = "❄️";
+                title.innerText = "Buzlanma ve Don Uyarısı";
+                title.style.color = "#93c5fd";
+                desc.innerText = "Sıcaklık donma noktasında veya altında. Karayollarında gizli buzlanma ve don tehlikesine karşı tedbir alınız.";
+            } else if (temp >= 35) {
+                banner.classList.add('alert-warning');
+                icon.innerText = "🔥";
+                title.innerText = "Aşırı Sıcaklık Dalgası Uyarısı";
+                title.style.color = "#ef4444";
+                desc.innerText = "Yüksek sıcaklık ve termal stres riski. Güneş çarpmasına karşı öğle saatlerinde doğrudan güneşte kalmayın.";
+            } else {
+                banner.classList.add('alert-safe');
+                icon.innerText = "🛡️";
+                title.innerText = "Stabil Meteorolojik Koşullar";
+                title.style.color = "#34d399";
+                desc.innerText = "Bölge genelinde herhangi bir acil hava uyarısı veya kritik risk bulunmamaktadır.";
+            }
+        }
+
+        function updateBadge(code, isDay) {
+            const desc = document.getElementById('val-desc');
+            const icon = document.getElementById('val-icon');
+
+            if ([0, 1].includes(code)) {
+                desc.innerText = isDay ? "Açık & Güneşli" : "Açık Gökyüzü (Gece)";
+                icon.innerText = isDay ? "☀️" : "🌙";
+            } else if ([2, 3, 45, 48].includes(code)) {
+                desc.innerText = "Parçalı Bulutlu";
+                icon.innerText = "⛅";
+            } else if ([51, 53, 55, 61, 63, 65, 80].includes(code)) {
+                desc.innerText = "Yağışlı";
+                icon.innerText = "🌧️";
+            } else if ([71, 73, 75, 85].includes(code)) {
+                desc.innerText = "Kar Yağışı";
+                icon.innerText = "❄️";
+            } else if ([95, 96, 99].includes(code)) {
+                desc.innerText = "Fırtına & Şimşek";
+                icon.innerText = "⚡";
+            }
+        }
+
+        function renderHourly(hourly) {
+            const container = document.getElementById('hourly-scroll');
+            container.innerHTML = "";
+            const h = new Date().getHours();
+
+            for (let i = h; i < h + 12; i++) {
+                if (!hourly.time[i]) break;
+                const time = hourly.time[i].slice(11, 16);
+                const t = formatTemp(hourly.temperature_2m[i]);
+                const code = hourly.weather_code[i];
+
+                let ic = "☀️";
+                if ([2, 3].includes(code)) ic = "⛅";
+                if ([51, 61, 63].includes(code)) ic = "🌧️";
+                if ([71, 73].includes(code)) ic = "❄️";
+                if ([95].includes(code)) ic = "⚡";
+
+                const slot = document.createElement('div');
+                slot.className = "hourly-slot";
+                slot.innerHTML = `
+                    <div class="h-time">${time}</div>
+                    <div class="h-icon">${ic}</div>
+                    <div class="h-temp">${t}°</div>
+                `;
+                container.appendChild(slot);
+            }
+        }
+
+        // --- 7 GÜNLÜK TAHMİN (TAM GÜN İSİMLERİ İLE) ---
+        function renderDaily(daily) {
+            const list = document.getElementById('daily-stack');
+            list.innerHTML = "";
+            const days = ["Pazar", "Pazartesi", "Salı", "Çarşamba", "Perşembe", "Cuma", "Cumartesi"];
+
+            for (let i = 0; i < 7; i++) {
+                if (!daily.time[i]) break;
+                const date = new Date(daily.time[i]);
+                const dayName = i === 0 ? "Bugün" : days[date.getDay()];
+                const max = formatTemp(daily.temperature_2m_max[i]);
+                const min = formatTemp(daily.temperature_2m_min[i]);
+                const code = daily.weather_code[i];
+
+                let ic = "☀️";
+                if ([2, 3].includes(code)) ic = "⛅";
+                if ([51, 61, 63].includes(code)) ic = "🌧️";
+                if ([71, 73].includes(code)) ic = "❄️";
+                if ([95].includes(code)) ic = "⚡";
+
+                const row = document.createElement('div');
+                row.className = "daily-line";
+                row.innerHTML = `
+                    <div class="d-name">${dayName}</div>
+                    <div class="d-icon">${ic}</div>
+                    <div class="d-range">
+                        <span class="d-min">${min}°</span>
+                        <span class="d-max">${max}°</span>
+                    </div>
+                `;
+                list.appendChild(row);
+            }
+        }
+
+        // --- 5. ŞEHİR ARAMA & CANLI AUTOCOMPLETE TAMAMLAMA ---
+        const searchInput = document.getElementById('city-search');
+        const searchDropdown = document.getElementById('search-dropdown');
+        let searchDebounceTimer = null;
+
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.trim();
+            clearTimeout(searchDebounceTimer);
+
+            if (query.length < 2) {
+                searchDropdown.style.display = "none";
+                searchDropdown.innerHTML = "";
+                return;
+            }
+
+            searchDebounceTimer = setTimeout(async () => {
+                try {
+                    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=5&language=tr&format=json`);
+                    const data = await res.json();
+                    
+                    if (data.results && data.results.length > 0) {
+                        searchDropdown.innerHTML = "";
+                        searchDropdown.style.display = "flex";
+                        
+                        data.results.forEach(target => {
+                            const item = document.createElement('div');
+                            item.className = "search-item";
+                            const admin = target.admin1 ? `, ${target.admin1}` : '';
+                            item.innerHTML = `
+                                <span><strong>${target.name}</strong><span style="font-size:0.75rem; color:#94a3b8;">${admin}</span></span>
+                                <span class="search-item-country">${target.country || ''}</span>
+                            `;
+                            item.onclick = () => {
+                                addHistory(target.name, target.latitude, target.longitude);
+                                goToLocation(target.name, target.latitude, target.longitude);
+                                searchInput.value = "";
+                                searchDropdown.style.display = "none";
+                            };
+                            searchDropdown.appendChild(item);
+                        });
+                    } else {
+                        searchDropdown.style.display = "none";
+                    }
+                } catch (err) {
+                    console.error("Autocomplete hatası:", err);
+                }
+            }, 250);
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !searchDropdown.contains(e.target)) {
+                searchDropdown.style.display = "none";
+            }
+        });
+
+        searchInput.addEventListener('keypress', async (e) => {
+            if (e.key === 'Enter') {
+                const query = searchInput.value.trim();
+                if (!query) return;
+
+                searchDropdown.style.display = "none";
+                try {
+                    const res = await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(query)}&count=1&language=tr&format=json`);
+                    const data = await res.json();
+                    if (data.results && data.results.length > 0) {
+                        const target = data.results[0];
+                        addHistory(target.name, target.latitude, target.longitude);
+                        goToLocation(target.name, target.latitude, target.longitude);
+                        searchInput.value = "";
+                    } else {
+                        alert("Şehir bulunamadı, lütfen geçerli bir yer yazın.");
+                    }
+                } catch (err) {
+                    console.error("Arama hatası:", err);
+                }
+            }
+        });
+
+        // --- 5.1. POWER USER KLAVYE KISAYOLLARI ---
+        window.addEventListener('keydown', (e) => {
+            // Kullanıcı arama kutusuna yazı yazıyorsa kısayolları yutma
+            if (document.activeElement === searchInput) {
+                if (e.key === 'Escape') {
+                    searchInput.blur();
+                    searchDropdown.style.display = "none";
+                }
+                return;
+            }
+
+            // 'F' veya '/' tuşu: Aramaya odaklan
+            if (e.key === '/' || e.key.toLowerCase() === 'f') {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
+            // 'Space' (Boşluk): Panoramik yörünge bakışı
+            else if (e.code === 'Space') {
+                e.preventDefault();
+                zoomOutOrbit();
+            }
+            // 'U' tuşu: Birim değiştir (°C / °F)
+            else if (e.key.toLowerCase() === 'u') {
+                e.preventDefault();
+                toggleTemperatureUnit();
+            }
+            // 'L' tuşu: Konumumu Bul (GPS)
+            else if (e.key.toLowerCase() === 'l') {
+                e.preventDefault();
+                locateUserGPS();
+            }
+        });
+
+        // --- 6. ANİMASYON DÖNGÜSÜ ---
+        function animate(time) {
+            requestAnimationFrame(animate);
+            TWEEN.update();
+
+            const sunVec = getLiveSunPosition();
+            earthMat.uniforms.sunDir.value.copy(sunVec);
+
+            if (targetRing.material.opacity > 0) {
+                const s = 1 + Math.sin(time * 0.007) * 0.15;
+                targetRing.scale.set(s, s, s);
+
+                const pulseCycle = (time * 0.002) % 1;
+                const pScale = 1 + pulseCycle * 2.4;
+                pulseRing.scale.set(pScale, pScale, pScale);
+                pulseRing.material.opacity = (1 - pulseCycle) * 0.75;
+            }
+
+            controls.update();
+            renderer.render(scene, camera);
+        }
+
+        // Başlangıç: Hafıza yüklemeleri & İstanbul'a pürüzsüz yaklaş
+        renderFavorites();
+        renderHistory();
+        goToLocation('İstanbul', 41.0082, 28.9784);
+        animate();
+
+        window.addEventListener('resize', () => {
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+        });
+    </script>
+</body>
+</html>
